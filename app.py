@@ -21,6 +21,9 @@ USERS_PATH = BASE_DIR / "data" / "users.json"
 ORDERS_PATH = BASE_DIR / "data" / "orders.json"
 CATEGORIES = ["All", "Music", "Tech", "Sports", "Business"]
 CITIES = ["Any", "New York", "San Francisco", "Berlin", "London", "Oakland", "San Jose"]
+MAX_ATTEMPTS = 3
+BLOCKED_TIME = 5 * 60  # 5 minutos en segundos
+USERS_BLOCK: Dict[str, Dict[str, float]] = {}
 
 
 @dataclass(frozen=True)
@@ -172,6 +175,12 @@ def save_orders(orders: list[dict]) -> None:
 def next_order_id(orders: list[dict]) -> int:
     return max([o.get("id", 0) for o in orders], default=0) + 1
 
+def require_login(role: str) -> bool:
+    user = get_current_user()
+    if not user or user.get("role") != role:
+        return True
+    return False
+
 
 # -----------------------------
 # Rutas
@@ -246,6 +255,18 @@ def login():
 
     field_errors = {}
 
+    if USERS_BLOCK.get(email) and USERS_BLOCK[email].get("blocked_time") != 0 and (datetime.now().timestamp() - USERS_BLOCK[email].get("blocked_time")) < 5 * 60:
+        return render_template(
+            "login.html",
+            error=f"This user is temporarily locked due to multiple failed login attempts. Please try again in {(5*60-(datetime.now().timestamp() - USERS_BLOCK[email].get('blocked_time'))) // 60} minutes.",
+            field_errors={"email": "User is locked."},
+            form={"email": email},
+        ), 429
+
+    elif USERS_BLOCK.get(email) and USERS_BLOCK[email].get("blocked_time") and (datetime.now().timestamp() - USERS_BLOCK[email].get("blocked_time")) >= 5 * 60:
+        USERS_BLOCK[email]["blocked_time"] = 0
+
+
     if not email.strip():
         field_errors["email"] = "Email is required."
     if not password.strip():
@@ -261,14 +282,26 @@ def login():
 
     user = find_user_by_email(email)
     if not user or user.get("password") != password:
+        if user and USERS_BLOCK.get(email):
+            USERS_BLOCK[email]["attempts"] += 1
+        elif user:
+            USERS_BLOCK[email] = {"attempts": 1, "blocked_time": 0}
+
+        if USERS_BLOCK[email]["attempts"] >= 3:
+            USERS_BLOCK[email]["blocked_time"] = datetime.now().timestamp()
+
         return render_template(
             "login.html",
             error="Invalid credentials.",
             field_errors={"email": " ", "password": " "},
             form={"email": email},
         ), 401
+    elif user and USERS_BLOCK.get(email):
+        del USERS_BLOCK[email]
 
     session["user_email"] = (user.get("email") or "").strip().lower()
+    # store role for template logic (admin link, etc.)
+    session["user_role"] = user.get("role", "user")
 
     return redirect(url_for("dashboard"))
 
@@ -308,6 +341,9 @@ def register():
 
 @app.get("/dashboard")
 def dashboard():
+    is_login_requiere = require_login(role="user")
+    if is_login_requiere:
+        return render_template("login.html", info_message="Please sign in to access your dashboard."), 403
 
 
     paid = request.args.get("paid") == "1"
@@ -316,7 +352,9 @@ def dashboard():
 
 @app.route("/checkout/<int:event_id>", methods=["GET", "POST"])
 def checkout(event_id: int):
-
+    is_login_requiere = require_login(role="user")
+    if is_login_requiere:
+        return render_template("login.html", info_message="Please sign in to proceed to checkout."), 403
 
     events = load_events()
     event = next((e for e in events if e.id == event_id), None)
@@ -395,7 +433,9 @@ def checkout(event_id: int):
 
 @app.route("/profile", methods=["GET", "POST"])
 def profile():
- 
+    is_login_requiere = require_login(role="user")
+    if is_login_requiere:
+        return render_template("login.html", info_message="Please sign in to access your profile."), 403
 
     user = get_current_user()
     if not user:
@@ -445,6 +485,9 @@ def profile():
     )
 @app.get("/admin/users")
 def admin_users():
+    is_login_requiere = require_login(role="admin")
+    if is_login_requiere:
+        return render_template("login.html", info_message="Please sign in to access the admin panel."), 403
 
     q = (request.args.get("q") or "").strip().lower()
     role = (request.args.get("role") or "all").strip().lower()
@@ -503,6 +546,14 @@ def admin_change_role(user_id: int):
             break
     save_users(users)
     return redirect(url_for("admin_users"))
+
+
+@app.route("/logout")
+def logout():
+    """Clear session and send user back to home page."""
+    session.clear()
+    return redirect(url_for("index"))
+
 
 if __name__ == "__main__":
     app.run(debug=True)
