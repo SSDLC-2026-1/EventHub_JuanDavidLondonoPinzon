@@ -66,6 +66,9 @@
                 <span class="auth-icon">🔑</span>
                 <input id="current_password" name="current_password" type="password" placeholder="••••••••">
                 </div>
+                {% if field_errors.get('current_password') %}
+                <div class="field-error">⛔ {{ field_errors.get('current_password') }}</div>
+                {% endif %}
             </div>
 
             <div>
@@ -74,6 +77,9 @@
                 <span class="auth-icon">🆕</span>
                 <input id="new_password" name="new_password" type="password" placeholder="••••••••">
                 </div>
+                {% if field_errors.get('new_password') %}
+                <div class="field-error">⛔ {{ field_errors.get('new_password') }}</div>
+                {% endif %}
             </div>
 
             <div>
@@ -82,6 +88,9 @@
                 <span class="auth-icon">✅</span>
                 <input id="confirm_new_password" name="confirm_new_password" type="password" placeholder="••••••••">
                 </div>
+                {% if field_errors.get('confirm_new_password') %}
+                <div class="field-error">⛔ {{ field_errors.get('confirm_new_password') }}</div>
+                {% endif %}
             </div>
             </div>
 
