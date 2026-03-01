@@ -11,10 +11,15 @@ import re
 import unicodedata
 
 from validation import validate_payment_form
+from encryption import hash_password, verify_password, encrypt_aes, decrypt_aes
+from Crypto.Random import get_random_bytes
 
 app = Flask(__name__)
 app.config["TEMPLATES_AUTO_RELOAD"] = True
 app.secret_key = "dev-secret-change-me"
+
+# Clave global para AES (16 bytes para AES-128)
+AES_KEY = get_random_bytes(16)
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -402,7 +407,13 @@ def login():
         ), 403
 
     user = find_user_by_email(norm_email)
-    if not user or user.get("password") != password:
+    
+    # Verificar credenciales: usuario existe Y contraseña es válida
+    password_valid = False
+    if user and isinstance(user.get("password"), dict):
+        password_valid = verify_password(password, user.get("password"))
+    
+    if not user or not password_valid:
         # increment attempts
         state["attempts"] = state.get("attempts", 0) + 1
         if state["attempts"] > MAX_LOGIN_ATTEMPTS:
@@ -482,12 +493,21 @@ def register():
     # all good, persist
     users = load_users()
     next_id = max([u.get("id", 0) for u in users], default=0) + 1
+    
+    # Hash de la contraseña
+    password_data = hash_password(clean_password)
+    
+    # Cifrado del teléfono
+    phone_cifrado, phone_nonce, phone_tag = encrypt_aes(clean_phone, AES_KEY)
+    
     users.append({
         "id": next_id,
         "full_name": clean_name,
         "email": clean_email,
-        "phone": clean_phone,
-        "password": clean_password,
+        "phone": phone_cifrado,
+        "phone_nonce": phone_nonce,
+        "phone_tag": phone_tag,
+        "password": password_data,
         "role": "user",
         "status": "active",
     })
@@ -545,11 +565,20 @@ def checkout(event_id: int):
         billing_email=billing_email
     )
 
+    # Cifrar email de facturación
+    email_cifrado, email_nonce, email_tag = encrypt_aes(clean.get("billing_email", ""), AES_KEY)
+    
+    # Ofuscar número de tarjeta: guardar solo últimos 4 dígitos
+    card_full = clean.get("card", "")
+    card_last_4 = "**** **** **** " + card_full[-4:] if len(card_full) >= 4 else ""
+
     form_data = {
         "exp_date": clean.get("exp_date", ""),
         "name_on_card": clean.get("name_on_card", ""),
-        "billing_email": clean.get("billing_email", ""),
-        "card": clean.get("card", "")
+        "billing_email": email_cifrado,
+        "billing_email_nonce": email_nonce,
+        "billing_email_tag": email_tag,
+        "card": card_last_4
     }
 
     if errors:
@@ -592,10 +621,18 @@ def profile():
         session.clear()
         return redirect(url_for("login"))
 
+    # Descifrar teléfono si está cifrado
+    phone_display = user.get("phone", "")
+    if user.get("phone_nonce"):
+        try:
+            phone_display = decrypt_aes(user.get("phone"), user.get("phone_nonce"), user.get("phone_tag"), AES_KEY)
+        except:
+            phone_display = "(encrypted)"
+
     form = {
         "full_name": user.get("full_name", ""),
         "email": user.get("email", ""),
-        "phone": user.get("phone", ""),
+        "phone": phone_display,
     }
 
     field_errors = {}  
@@ -624,7 +661,7 @@ def profile():
             # require current password
             if not current_password:
                 field_errors["current_password"] = "Current password required to change password."
-            elif current_password != user.get("password"):
+            elif not verify_password(current_password, user.get("password")):
                 field_errors["current_password"] = "Current password is incorrect."
 
             # validate new password contents
@@ -656,9 +693,15 @@ def profile():
         for u in users:
             if (u.get("email") or "").strip().lower() == email_norm:
                 u["full_name"] = clean_name
-                u["phone"] = clean_phone
+                
+                # Cifrar teléfono
+                phone_cifrado, phone_nonce, phone_tag = encrypt_aes(clean_phone, AES_KEY)
+                u["phone"] = phone_cifrado
+                u["phone_nonce"] = phone_nonce
+                u["phone_tag"] = phone_tag
+                
                 if new_password:
-                    u["password"] = new_password
+                    u["password"] = hash_password(new_password)
                 break
 
         save_users(users)
@@ -736,15 +779,6 @@ def admin_change_role(user_id: int):
             break
     save_users(users)
     return redirect(url_for("admin_users"))
-
-
-@app.route("/logout")
-def logout():
-    """Clear session and send user back to home page."""
-    session.clear()
-    return redirect(url_for("index"))
-
-
 
 @app.route("/logout")
 def logout():

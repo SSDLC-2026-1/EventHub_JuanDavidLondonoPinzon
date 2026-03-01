@@ -61,15 +61,19 @@ def decrypt_aes(texto_cifrado_hex, nonce_hex, tag_hex, clave):
     4. Retornar el texto descifrado como string.
     """
 
-    # TODO: Implementar conversión de hex a bytes
+    # Convertir hex a bytes
+    texto_cifrado = bytes.fromhex(texto_cifrado_hex)
+    nonce = bytes.fromhex(nonce_hex)
+    tag = bytes.fromhex(tag_hex)
 
-    # TODO: Crear objeto AES con nonce
+    # Crear objeto AES con nonce
+    cipher = AES.new(clave, AES.MODE_EAX, nonce=nonce)
 
-    # TODO: Usar decrypt_and_verify
+    # Desencriptar y verificar integridad
+    texto_descifrado = cipher.decrypt_and_verify(texto_cifrado, tag)
 
-    # TODO: Convertir resultado a string y retornar
-
-    pass
+    # Convertir bytes a string y retornar
+    return texto_descifrado.decode()
 
 # ==========================================================
 # PASSWORD HASHING (PBKDF2 - SHA256)
@@ -100,13 +104,28 @@ def hash_password(password):
         hashlib.pbkdf2_hmac(...)
     """
 
-    # TODO: Generar salt aleatoria
-
-    # TODO: Derivar clave usando pbkdf2_hmac
-
-    # TODO: Retornar diccionario con salt y hash en formato hex
-
-    pass
+    # Generar salt aleatoria de 16 bytes
+    salt = get_random_bytes(16)
+    
+    # Configurar iteraciones
+    iterations = 200000
+    
+    # Derivar clave usando PBKDF2-HMAC-SHA256
+    hash_derivado = hashlib.pbkdf2_hmac(
+        'sha256',
+        password.encode(),
+        salt,
+        iterations,
+        dklen=32
+    )
+    
+    # Retornar diccionario con salt y hash en formato hex
+    return {
+        "algorithm": "pbkdf2_sha256",
+        "iterations": iterations,
+        "salt": salt.hex(),
+        "hash": hash_derivado.hex()
+    }
 
 
 
@@ -132,13 +151,25 @@ def verify_password(password, stored_data):
         }
     """
 
-    # TODO: Extraer salt e iterations
-
-    # TODO: Recalcular hash
-
-    # TODO: Comparar con compare_digest
-
-    pass
+    # Extraer salt e iterations del diccionario
+    salt_hex = stored_data.get("salt")
+    iterations = stored_data.get("iterations")
+    hash_almacenado = stored_data.get("hash")
+    
+    # Convertir salt de hex a bytes
+    salt = bytes.fromhex(salt_hex)
+    
+    # Recalcular el hash con la contraseña ingresada
+    hash_recalculado = hashlib.pbkdf2_hmac(
+        'sha256',
+        password.encode(),
+        salt,
+        iterations,
+        dklen=32
+    ).hex()
+    
+    # Comparar usando hmac.compare_digest() para evitar timing attacks
+    return hmac.compare_digest(hash_recalculado, hash_almacenado)
 
 
 
