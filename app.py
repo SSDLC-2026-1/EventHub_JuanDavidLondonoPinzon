@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional, Dict, Tuple
 
 from flask import Flask, render_template, request, abort, url_for, redirect, session
@@ -11,7 +11,7 @@ import re
 import unicodedata
 
 from validation import validate_payment_form
-from encryption import hash_password, verify_password, encrypt_aes, decrypt_aes
+from encryption import hash_password, verify_password, encrypt_aes, decrypt_aes, obfuscate_card_number
 from Crypto.Random import get_random_bytes
 
 app = Flask(__name__)
@@ -447,6 +447,9 @@ def login():
     # store role for template logic (admin link, etc.)
     session["user_role"] = user.get("role", "user")
 
+    # store login time for potential session expiration logic
+    session["time_user_logged_in"] = datetime.now(timezone.utc)
+
     session["user_email"] = norm_email
     return redirect(url_for("dashboard"))
 
@@ -519,7 +522,6 @@ def register():
 @require_login()
 def dashboard():
 
-
     paid = request.args.get("paid") == "1"
     user = get_current_user()
     return render_template("dashboard.html", user_name=(user.get("full_name") if user else "User"), paid=paid)
@@ -527,6 +529,10 @@ def dashboard():
 @app.route("/checkout/<int:event_id>", methods=["GET", "POST"])
 @require_login()
 def checkout(event_id: int):
+
+    if datetime.now(timezone.utc) - session.get("time_user_logged_in") > timedelta(minutes=3):
+        session.clear()
+        return redirect(url_for("login"))
 
     events = load_events()
     event = next((e for e in events if e.id == event_id), None)
@@ -568,9 +574,6 @@ def checkout(event_id: int):
     # Cifrar email de facturación
     email_cifrado, email_nonce, email_tag = encrypt_aes(clean.get("billing_email", ""), AES_KEY)
     
-    # Ofuscar número de tarjeta: guardar solo últimos 4 dígitos
-    card_full = clean.get("card", "")
-    card_last_4 = "**** **** **** " + card_full[-4:] if len(card_full) >= 4 else ""
 
     form_data = {
         "exp_date": clean.get("exp_date", ""),
@@ -578,7 +581,7 @@ def checkout(event_id: int):
         "billing_email": email_cifrado,
         "billing_email_nonce": email_nonce,
         "billing_email_tag": email_tag,
-        "card": card_last_4
+        "card": obfuscate_card_number(clean.get("card", "")),
     }
 
     if errors:
@@ -586,7 +589,7 @@ def checkout(event_id: int):
             "checkout.html",
             event=event, qty=qty, subtotal=subtotal,
             service_fee=service_fee, total=total,
-            errors=errors, form_data=form_data
+            errors=errors, form_data=clean
         ), 400
 
     orders = load_orders()
@@ -618,6 +621,10 @@ def profile():
 
     user = get_current_user()
     if not user:
+        session.clear()
+        return redirect(url_for("login"))
+    
+    if datetime.now(timezone.utc) - session.get("time_user_logged_in") > timedelta(minutes=3):
         session.clear()
         return redirect(url_for("login"))
 
@@ -720,6 +727,10 @@ def profile():
 @require_login(role="admin")
 def admin_users():
 
+    if datetime.now(timezone.utc) - session.get("time_user_logged_in") > timedelta(minutes=3):
+        session.clear()
+        return redirect(url_for("login"))
+
     q = (request.args.get("q") or "").strip().lower()
     role = (request.args.get("role") or "all").strip().lower()
     status = (request.args.get("status") or "all").strip().lower()
@@ -758,6 +769,9 @@ def admin_users():
 @app.post("/admin/users/<int:user_id>/toggle")
 @require_login(role="admin")
 def admin_toggle_user(user_id: int):
+    if datetime.now(timezone.utc) - session.get("time_user_logged_in") > timedelta(minutes=3):
+        session.clear()
+        return redirect(url_for("login"))
     users = load_users()
     for u in users:
         if int(u.get("id", 0)) == user_id:

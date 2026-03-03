@@ -171,6 +171,13 @@ def verify_password(password, stored_data):
     # Comparar usando hmac.compare_digest() para evitar timing attacks
     return hmac.compare_digest(hash_recalculado, hash_almacenado)
 
+def obfuscate_card_number(card_number):
+    # Source - https://stackoverflow.com/q/9730653
+    # Posted by Bill Swearingen
+    # Retrieved 2026-03-03, License - CC BY-SA 3.0
+
+    return card_number[-4:].rjust(len(card_number), "*")
+
 
 
 if __name__ == "__main__":
@@ -202,3 +209,7 @@ if __name__ == "__main__":
     # Cuando implementen verify_password:
     # print("Verificación correcta:",
     #       verify_password("Password123!", pwd_data))
+
+    print("\n=== PRUEBA ofuscación ===")
+    card_number = "000000000000000000000"
+    print("Número de tarjeta ofuscado:", obfuscate_card_number(card_number))

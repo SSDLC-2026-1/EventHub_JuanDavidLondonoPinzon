@@ -30,5 +30,21 @@
     },
     "role": "user",
     "status": "active"
+  },
+  {
+    "id": 3,
+    "full_name": "Santiago Melo",
+    "email": "santiago@gmail.com",
+    "phone": "af9e11abe0ae757442e9",
+    "phone_nonce": "d67e24439b684e48f7577145dd80a30e",
+    "phone_tag": "2b816b350d428d52fac9b1ef88b62fef",
+    "password": {
+      "algorithm": "pbkdf2_sha256",
+      "iterations": 200000,
+      "salt": "1386ced9deadd1335901e4ffefbaad3a",
+      "hash": "63bca0d7fa503dbda28325644b46158b49ce484b6ed57be2ad41688840afe3ad"
+    },
+    "role": "user",
+    "status": "active"
   }
 ]
